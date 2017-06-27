@@ -1225,3 +1225,111 @@ class VolumeFractions( BaseModel ) :
 
     def fit( self, y, dirs, KERNELS, params ) :
         raise NotImplementedError
+
+
+class StickZeppelinBallMultiDiffusivity( BaseModel ) :
+    """Implements the Stick-Zeppelin-Ball model [1].
+
+    The intra-cellular contributions from within the axons are modeled as "sticks", i.e.
+    tensors with a given set of axial diffusivities (d_par) but null perpendicular diffusivity.
+    Extra-cellular contributions are modeled as tensors with the same axial diffusivity
+    as the sticks (d_par) and whose perpendicular diffusivities are calculated with a
+    tortuosity model as a function of the intra-cellular volume fractions (ICVFs).
+    Isotropic contributions are modeled as tensors with isotropic diffusivities (d_ISOs).
+
+    References
+    ----------
+    .. [1] Panagiotaki et al. (2012) Compartment models of the diffusion MR signal
+           in brain white matter: A taxonomy and comparison. NeuroImage, 59: 2241-54
+    """
+
+    def __init__( self ) :
+        self.id         = 'StickZeppelinBallMultiDiffusivity'
+        self.name       = 'Stick-Zeppelin-Ball-MultiDiffusivity'
+        self.maps_name  = [ ]
+        self.maps_descr = [ ]
+
+        self.d_par  = np.array([ 1.5E-3, 1.7E-3 ])                    # Parallel diffusivity [mm^2/s]
+        self.ICVFs  = np.arange(0.3,0.9,0.1)    # Intra-cellular volume fraction(s) [0..1]
+        self.d_ISOs = np.array([ 3.0E-3 ])      # Isotropic diffusivitie(s) [mm^2/s]
+
+
+    def set( self, d_par, ICVFs, d_ISOs ) :
+        self.d_par  = np.array( d_par )
+        self.ICVFs  = np.array( ICVFs )
+        self.d_ISOs = np.array( d_ISOs )
+
+
+    def set_solver( self ) :
+        raise NotImplementedError
+
+
+    def generate( self, out_path, aux, idx_in, idx_out ) :
+        scheme_high = amico.lut.create_high_resolution_scheme( self.scheme, b_scale=1 )
+        gtab = gradient_table( scheme_high.b, scheme_high.raw[:,0:3] )
+
+        nATOMS = len(self.d_par) + len(self.ICVFs)*len(self.d_par) + len(self.d_ISOs)
+        progress = ProgressBar( n=nATOMS, prefix="   ", erase=True )
+
+        # Stick
+        for d in [ self.d_par ]
+            signal = single_tensor( gtab, evals=[0, 0, d] )
+            lm = amico.lut.rotate_kernel( signal, aux, idx_in, idx_out, False )
+            np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
+            progress.update()
+
+        # Zeppelin(s)
+        for i in [ self.d_par ] :
+            for d in [ self.d_par*(1.0-ICVF) for ICVF in self.ICVFs] :
+                signal = single_tensor( gtab, evals=[d, d, i] )
+                lm = amico.lut.rotate_kernel( signal, aux, idx_in, idx_out, False )
+                np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
+                progress.update()
+
+        # Ball(s)
+        for d in self.d_ISOs :
+            signal = single_tensor( gtab, evals=[d, d, d] )
+            lm = amico.lut.rotate_kernel( signal, aux, idx_in, idx_out, True )
+            np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
+            progress.update()
+
+
+    def resample( self, in_path, idx_out, Ylm_out, doMergeB0 ) :
+        KERNELS = {}
+        KERNELS['model'] = self.id
+        if doMergeB0:
+            nS = 1+self.scheme.dwi_count
+            merge_idx = np.hstack((self.scheme.b0_idx[0],self.scheme.dwi_idx))
+        else:
+            nS = self.scheme.nS
+            merge_idx = np.arange(nS)
+        KERNELS['wmr']   = np.zeros( (len(self.d_par),181,181,nS), dtype=np.float32 )
+        KERNELS['wmh']   = np.zeros( (len(self.ICVFs)*len(self.d_par),181,181,nS), dtype=np.float32 )
+        KERNELS['iso']   = np.zeros( (len(self.d_ISOs),nS), dtype=np.float32 )
+
+        nATOMS = len(self.d_par) + len(self.ICVFs)*len(self.d_par) + len(self.d_ISOs)
+        progress = ProgressBar( n=nATOMS, prefix="   ", erase=True )
+
+        # Stick(s)
+        for i in xrange(len(self.d_par)) :
+            lm = np.load( pjoin( in_path, 'A_%03d.npy'%progress.i ) )
+            KERNELS['wmr'][i,...] = amico.lut.resample_kernel( lm, self.scheme.nS, idx_out, Ylm_out, False )[:,:,merge_idx]
+            progress.update()
+
+        # Zeppelin(s)
+        for i in xrange(len(self.ICVFs)*len(self.d_par)) :
+            lm = np.load( pjoin( in_path, 'A_%03d.npy'%progress.i ) )
+            KERNELS['wmh'][i,...] = amico.lut.resample_kernel( lm, self.scheme.nS, idx_out, Ylm_out, False )[:,:,merge_idx]
+            progress.update()
+
+        # Ball(s)
+        for i in xrange(len(self.d_ISOs)) :
+            lm = np.load( pjoin( in_path, 'A_%03d.npy'%progress.i ) )
+            KERNELS['iso'][i,...] = amico.lut.resample_kernel( lm, self.scheme.nS, idx_out, Ylm_out, True )[merge_idx]
+            progress.update()
+
+        return KERNELS
+
+
+    def fit( self, y, dirs, KERNELS, params ) :
+        raise NotImplementedError
