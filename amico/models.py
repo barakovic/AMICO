@@ -1270,16 +1270,16 @@ class StickZeppelinBallMultiDiffusivity( BaseModel ) :
         progress = ProgressBar( n=nATOMS, prefix="   ", erase=True )
 
         # Stick
-        for d in [ self.d_par ]
+        for d in self.d_par :
             signal = single_tensor( gtab, evals=[0, 0, d] )
             lm = amico.lut.rotate_kernel( signal, aux, idx_in, idx_out, False )
             np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
             progress.update()
 
         # Zeppelin(s)
-        for i in [ self.d_par ] :
-            for d in [ self.d_par*(1.0-ICVF) for ICVF in self.ICVFs] :
-                signal = single_tensor( gtab, evals=[d, d, i] )
+        for d in self.d_par :
+            for d1 in [ d*(1.0-ICVF) for ICVF in self.ICVFs] :
+                signal = single_tensor( gtab, evals=[d1, d1, d] )
                 lm = amico.lut.rotate_kernel( signal, aux, idx_in, idx_out, False )
                 np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
                 progress.update()
