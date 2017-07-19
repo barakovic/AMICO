@@ -1225,7 +1225,7 @@ class VolumeFractions( BaseModel ) :
         raise NotImplementedError
 
 
-class StickZeppelinBallMultiDiffusivity( BaseModel ) :
+class StickZeppelinBallDiffusivityT2( BaseModel ) :
     """Implements the Stick-Zeppelin-Ball model [1].
 
     The intra-cellular contributions from within the axons are modeled as "sticks", i.e.
@@ -1242,20 +1242,22 @@ class StickZeppelinBallMultiDiffusivity( BaseModel ) :
     """
 
     def __init__( self ) :
-        self.id         = 'StickZeppelinBallMultiDiffusivity'
-        self.name       = 'Stick-Zeppelin-Ball-MultiDiffusivity'
+        self.id         = 'StickZeppelinBallDiffusivityT2'
+        self.name       = 'Stick-Zeppelin-Ball-Diffusivity-T2'
         self.maps_name  = [ ]
         self.maps_descr = [ ]
 
-        self.d_par  = np.array([ 1.5E-3, 1.7E-3 ])                    # Parallel diffusivity [mm^2/s]
+        self.d_par  = np.array([ 1.2E-3, 1.7E-3 ])                    # Parallel diffusivity [mm^2/s]
         self.ICVFs  = np.arange(0.3,0.9,0.1)    # Intra-cellular volume fraction(s) [0..1]
         self.d_ISOs = np.array([ 3.0E-3 ])      # Isotropic diffusivitie(s) [mm^2/s]
+        self.T2s = np.array([ 104, 62 ])      # Isotropic diffusivitie(s) [mm^2/s]
 
 
-    def set( self, d_par, ICVFs, d_ISOs ) :
+    def set( self, d_par, ICVFs, d_ISOs, T2s ) :
         self.d_par  = np.array( d_par )
         self.ICVFs  = np.array( ICVFs )
         self.d_ISOs = np.array( d_ISOs )
+        self.T2s = np.array( T2s )
 
 
     def set_solver( self ) :
@@ -1264,27 +1266,40 @@ class StickZeppelinBallMultiDiffusivity( BaseModel ) :
 
     def generate( self, out_path, aux, idx_in, idx_out ) :
         scheme_high = amico.lut.create_high_resolution_scheme( self.scheme, b_scale=1 )
-        gtab = gradient_table( scheme_high.b, scheme_high.raw[:,0:3] )
+        # gtab = gradient_table( scheme_high.b, scheme_high.raw[:,0:3] )
 
-        nATOMS = len(self.d_par) + len(self.ICVFs)*len(self.d_par) + len(self.d_ISOs)
+        nATOMS = len(self.d_par)*len(self.T2s) + len(self.ICVFs)*len(self.d_par)*len(self.T2s) + len(self.d_ISOs)
         progress = ProgressBar( n=nATOMS, prefix="   ", erase=True )
 
         # Stick
         for d in self.d_par :
-            signal = single_tensor( gtab, evals=[0, 0, d] )
-            lm = amico.lut.rotate_kernel( signal, aux, idx_in, idx_out, False )
-            np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
-            progress.update()
+            for d1 in self.T2s :
+                gtab = gradient_table( np.ones(scheme_high.shells[0]['grad'].shape[0])*scheme_high.shells[0]['b'], scheme_high.shells[0]['grad'] )
+                final_signal = np.exp( -(scheme_high.shells[0]['TE']/d1) ) * single_tensor( gtab, evals=[0, 0, d] )
+                for d2 in ( 1, len(scheme_high.shells)-1 ) :
+                    gtab = gradient_table( np.ones(scheme_high.shells[d2]['grad'].shape[0])*scheme_high.shells[d2]['b'], scheme_high.shells[d2]['grad'] )
+                    temp_signal = np.exp( -(scheme_high.shells[0]['TE']/d1) ) * single_tensor( gtab, evals=[0, 0, d] )
+                    final_signal = np.hstack( (final_signal, temp_signal) )
+                lm = amico.lut.rotate_kernel( final_signal, aux, idx_in, idx_out, False )
+                np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
+                progress.update()
 
         # Zeppelin(s)
         for d in self.d_par :
             for d1 in [ d*(1.0-ICVF) for ICVF in self.ICVFs] :
-                signal = single_tensor( gtab, evals=[d1, d1, d] )
-                lm = amico.lut.rotate_kernel( signal, aux, idx_in, idx_out, False )
-                np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
-                progress.update()
+                for d2 in self.T2s :
+                    gtab = gradient_table( np.ones(scheme_high.shells[0]['grad'].shape[0])*scheme_high.shells[0]['b'], scheme_high.shells[0]['grad'] )
+                    final_signal =  np.exp( -(scheme_high.shells[0]['TE']/d2) ) * single_tensor( gtab, evals=[d1, d1, d] )
+                    for d3 in (1, len(scheme_high.shells)-1) :
+                        gtab = gradient_table( np.ones(scheme_high.shells[d3]['grad'].shape[0])*scheme_high.shells[d3]['b'], scheme_high.shells[d3]['grad'] )
+                        temp_signal = np.exp( -(scheme_high.shells[d3]['TE']/d2) ) * single_tensor( gtab, evals=[d1, d1, d] )
+                        final_signal = np.hstack( (final_signal, temp_signal) )
+                    lm = amico.lut.rotate_kernel( final_signal, aux, idx_in, idx_out, False )
+                    np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
+                    progress.update()
 
         # Ball(s)
+        gtab = gradient_table( scheme_high.b, scheme_high.raw[:,0:3] )
         for d in self.d_ISOs :
             signal = single_tensor( gtab, evals=[d, d, d] )
             lm = amico.lut.rotate_kernel( signal, aux, idx_in, idx_out, True )
@@ -1301,21 +1316,21 @@ class StickZeppelinBallMultiDiffusivity( BaseModel ) :
         else:
             nS = self.scheme.nS
             merge_idx = np.arange(nS)
-        KERNELS['wmr']   = np.zeros( (len(self.d_par),181,181,nS), dtype=np.float32 )
-        KERNELS['wmh']   = np.zeros( (len(self.ICVFs)*len(self.d_par),181,181,nS), dtype=np.float32 )
+        KERNELS['wmr']   = np.zeros( (len(self.d_par)*len(self.T2s),181,181,nS), dtype=np.float32 )
+        KERNELS['wmh']   = np.zeros( (len(self.ICVFs)*len(self.d_par)*len(self.T2s),181,181,nS), dtype=np.float32 )
         KERNELS['iso']   = np.zeros( (len(self.d_ISOs),nS), dtype=np.float32 )
 
-        nATOMS = len(self.d_par) + len(self.ICVFs)*len(self.d_par) + len(self.d_ISOs)
+        nATOMS = len(self.d_par)*len(self.T2s) + len(self.ICVFs)*len(self.d_par)*len(self.T2s) + len(self.d_ISOs)
         progress = ProgressBar( n=nATOMS, prefix="   ", erase=True )
 
         # Stick(s)
-        for i in xrange(len(self.d_par)) :
+        for i in xrange(len(self.d_par)*len(self.T2s)) :
             lm = np.load( pjoin( in_path, 'A_%03d.npy'%progress.i ) )
             KERNELS['wmr'][i,...] = amico.lut.resample_kernel( lm, self.scheme.nS, idx_out, Ylm_out, False )[:,:,merge_idx]
             progress.update()
 
         # Zeppelin(s)
-        for i in xrange(len(self.ICVFs)*len(self.d_par)) :
+        for i in xrange(len(self.ICVFs)*len(self.d_par)*len(self.T2s)) :
             lm = np.load( pjoin( in_path, 'A_%03d.npy'%progress.i ) )
             KERNELS['wmh'][i,...] = amico.lut.resample_kernel( lm, self.scheme.nS, idx_out, Ylm_out, False )[:,:,merge_idx]
             progress.update()
