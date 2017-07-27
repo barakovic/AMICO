@@ -1316,17 +1316,14 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
         nATOMS = len(self.d_par)*len(self.T2s) + len(self.ICVFs)*len(self.d_par)*len(self.T2s) + len(self.d_ISOs)
         progress = ProgressBar( n=nATOMS, prefix="   ", erase=True )
 
-        import numpy as np
-        TE = np.loadtxt('TE_file.txt')
-
         # Stick
         for d in self.d_par :
             for d1 in self.T2s :
                 gtab = gradient_table( np.ones(scheme_high.shells[0]['grad'].shape[0])*scheme_high.shells[0]['b'], scheme_high.shells[0]['grad'] )
-                final_signal = np.exp( -(TE[0]/d1) ) * single_tensor( gtab, evals=[0, 0, d] )
+                final_signal = np.exp( -(scheme_high.shells[0]['TE']/d1) ) * single_tensor( gtab, evals=[0, 0, d] )
                 for d2 in xrange( 1, len(scheme_high.shells) ) :
                     gtab = gradient_table( np.ones(scheme_high.shells[d2]['grad'].shape[0])*scheme_high.shells[d2]['b'], scheme_high.shells[d2]['grad'] )
-                    temp_signal = np.exp( -(TE[d2]/d1) ) * single_tensor( gtab, evals=[0, 0, d] )
+                    temp_signal = np.exp( -(scheme_high.shells[d2]['TE']/d1) ) * single_tensor( gtab, evals=[0, 0, d] )
                     final_signal = np.hstack( (final_signal, temp_signal) )
                 lm = amico.lut.rotate_kernel( final_signal, aux, idx_in, idx_out, False )
                 np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
@@ -1337,10 +1334,10 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
             for d1 in [ d*(1.0-ICVF) for ICVF in self.ICVFs] :
                 for d2 in self.T2s :
                     gtab = gradient_table( np.ones(scheme_high.shells[0]['grad'].shape[0])*scheme_high.shells[0]['b'], scheme_high.shells[0]['grad'] )
-                    final_signal =  np.exp( -(TE[0]/d2) ) * single_tensor( gtab, evals=[d1, d1, d] )
+                    final_signal =  np.exp( -(scheme_high.shells[0]['TE']/d2) ) * single_tensor( gtab, evals=[d1, d1, d] )
                     for d3 in xrange(1, len(scheme_high.shells)) :
                         gtab = gradient_table( np.ones(scheme_high.shells[d3]['grad'].shape[0])*scheme_high.shells[d3]['b'], scheme_high.shells[d3]['grad'] )
-                        temp_signal = np.exp( -(TE[d3]/d2) ) * single_tensor( gtab, evals=[d1, d1, d] )
+                        temp_signal = np.exp( -(scheme_high.shells[d3]['TE']/d2) ) * single_tensor( gtab, evals=[d1, d1, d] )
                         final_signal = np.hstack( (final_signal, temp_signal) )
                     lm = amico.lut.rotate_kernel( final_signal, aux, idx_in, idx_out, False )
                     np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
