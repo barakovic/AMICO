@@ -187,8 +187,8 @@ class StickZeppelinBall( BaseModel ) :
     def __init__( self ) :
         self.id         = 'StickZeppelinBall'
         self.name       = 'Stick-Zeppelin-Ball'
-        self.maps_name  = [ ]
-        self.maps_descr = [ ]
+        self.maps_name  = [ 'v' ]
+        self.maps_descr = [ 'Intra-cellular volume fraction' ]
 
         self.d_par  = 1.7E-3                    # Parallel diffusivity [mm^2/s]
         self.ICVFs  = np.arange(0.3,0.9,0.1)    # Intra-cellular volume fraction(s) [0..1]
@@ -201,8 +201,13 @@ class StickZeppelinBall( BaseModel ) :
         self.d_ISOs = np.array( d_ISOs )
 
 
-    def set_solver( self ) :
-        raise NotImplementedError
+    def set_solver( self, lambda1 = 0.0, lambda2 = 4.0 ) :
+        params = {}
+        params['mode']    = 2
+        params['pos']     = True
+        params['lambda1'] = lambda1
+        params['lambda2'] = lambda2
+        return params
 
 
     def generate( self, out_path, aux, idx_in, idx_out ) :
@@ -270,7 +275,40 @@ class StickZeppelinBall( BaseModel ) :
 
 
     def fit( self, y, dirs, KERNELS, params ) :
-        raise NotImplementedError
+        nD = dirs.shape[0]
+        n1 = 1
+        n2 = len(self.ICVFs)
+        n3 = len(self.d_ISOs)
+        nATOMS = nD*(n1+n2)+n3
+        # prepare DICTIONARY from dirs and lookup tables
+        A = np.ones( (len(y), nATOMS ), dtype=np.float64, order='F' )
+        o = 0
+        for i in xrange(nD) :
+            i1, i2 = amico.lut.dir_TO_lut_idx( dirs[i] )
+            A[:,o:(o+n1)] = KERNELS['wmr'][:,i1,i2,:].T
+            o += n1
+        for i in xrange(nD) :
+            i1, i2 = amico.lut.dir_TO_lut_idx( dirs[i] )
+            A[:,o:(o+n2)] = KERNELS['wmh'][:,i1,i2,:].T
+            o += n2
+        A[:,o:] = KERNELS['iso'].T
+
+        # empty dictionary
+        if A.shape[1] == 0 :
+            return [0, 0, 0], None, None, None
+
+        # fit
+        x = spams.lasso( np.asfortranarray( y.reshape(-1,1) ), D=A, **params ).todense().A1
+
+        # return estimates
+        f1 = x[ :(nD*n1) ].sum()
+        f2 = x[ (nD*n1):(nD*(n1+n2)) ].sum()
+        v = f1 / ( f1 + f2 + 1e-16 )
+        xIC = x[:nD*n1].reshape(-1,n1).sum(axis=0)
+        # a = 1E6 * 2.0 * np.dot(self.Rs,xIC) / ( f1 + 1e-16 )
+        # d = (4.0*v) / ( np.pi*a**2 + 1e-16 )
+        # return [v, a, d], dirs, x, A
+        return [v], dirs, x, A
 
 
 
@@ -1246,8 +1284,8 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
     def __init__( self ) :
         self.id         = 'StickZeppelinBallDiffusivityT2'
         self.name       = 'Stick-Zeppelin-Ball-Diffusivity-T2'
-        self.maps_name  = [ ]
-        self.maps_descr = [ ]
+        self.maps_name  = [ 'v' ]
+        self.maps_descr = [ 'Intra-cellular volume fraction' ]
 
         self.d_par  = np.array([ 1.2E-3, 1.7E-3 ])                    # Parallel diffusivity [mm^2/s]
         self.ICVFs  = np.arange(0.3,0.9,0.1)    # Intra-cellular volume fraction(s) [0..1]
@@ -1262,8 +1300,13 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
         self.T2s = np.array( T2s )
 
 
-    def set_solver( self ) :
-        raise NotImplementedError
+    def set_solver( self, lambda1 = 0.0, lambda2 = 4.0 ) :
+        params = {}
+        params['mode']    = 2
+        params['pos']     = True
+        params['lambda1'] = lambda1
+        params['lambda2'] = lambda2
+        return params
 
 
     def generate( self, out_path, aux, idx_in, idx_out ) :
@@ -1273,14 +1316,17 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
         nATOMS = len(self.d_par)*len(self.T2s) + len(self.ICVFs)*len(self.d_par)*len(self.T2s) + len(self.d_ISOs)
         progress = ProgressBar( n=nATOMS, prefix="   ", erase=True )
 
+        import numpy as np
+        TE = np.loadtxt('TE_file.txt')
+
         # Stick
         for d in self.d_par :
             for d1 in self.T2s :
                 gtab = gradient_table( np.ones(scheme_high.shells[0]['grad'].shape[0])*scheme_high.shells[0]['b'], scheme_high.shells[0]['grad'] )
-                final_signal = np.exp( -(scheme_high.shells[0]['TE']/d1) ) * single_tensor( gtab, evals=[0, 0, d] )
-                for d2 in ( 1, len(scheme_high.shells)-1 ) :
+                final_signal = np.exp( -(TE[0]/d1) ) * single_tensor( gtab, evals=[0, 0, d] )
+                for d2 in xrange( 1, len(scheme_high.shells) ) :
                     gtab = gradient_table( np.ones(scheme_high.shells[d2]['grad'].shape[0])*scheme_high.shells[d2]['b'], scheme_high.shells[d2]['grad'] )
-                    temp_signal = np.exp( -(scheme_high.shells[0]['TE']/d1) ) * single_tensor( gtab, evals=[0, 0, d] )
+                    temp_signal = np.exp( -(TE[d2]/d1) ) * single_tensor( gtab, evals=[0, 0, d] )
                     final_signal = np.hstack( (final_signal, temp_signal) )
                 lm = amico.lut.rotate_kernel( final_signal, aux, idx_in, idx_out, False )
                 np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
@@ -1291,10 +1337,10 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
             for d1 in [ d*(1.0-ICVF) for ICVF in self.ICVFs] :
                 for d2 in self.T2s :
                     gtab = gradient_table( np.ones(scheme_high.shells[0]['grad'].shape[0])*scheme_high.shells[0]['b'], scheme_high.shells[0]['grad'] )
-                    final_signal =  np.exp( -(scheme_high.shells[0]['TE']/d2) ) * single_tensor( gtab, evals=[d1, d1, d] )
-                    for d3 in (1, len(scheme_high.shells)-1) :
+                    final_signal =  np.exp( -(TE[0]/d2) ) * single_tensor( gtab, evals=[d1, d1, d] )
+                    for d3 in xrange(1, len(scheme_high.shells)) :
                         gtab = gradient_table( np.ones(scheme_high.shells[d3]['grad'].shape[0])*scheme_high.shells[d3]['b'], scheme_high.shells[d3]['grad'] )
-                        temp_signal = np.exp( -(scheme_high.shells[d3]['TE']/d2) ) * single_tensor( gtab, evals=[d1, d1, d] )
+                        temp_signal = np.exp( -(TE[d3]/d2) ) * single_tensor( gtab, evals=[d1, d1, d] )
                         final_signal = np.hstack( (final_signal, temp_signal) )
                     lm = amico.lut.rotate_kernel( final_signal, aux, idx_in, idx_out, False )
                     np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
@@ -1347,4 +1393,39 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
 
 
     def fit( self, y, dirs, KERNELS, params ) :
-        raise NotImplementedError
+        nD = dirs.shape[0]
+        n1 = len(self.d_par)
+        n2 = len(self.ICVFs)
+        n3 = len(self.d_ISOs)
+        n4 = len(self.T2s)
+        nATOMS = nD*n1*n4+ nD*n1*n2*n4+n3
+
+        # prepare DICTIONARY from dirs and lookup tables
+        A = np.ones( (len(y), nATOMS ), dtype=np.float64, order='F' )
+        o = 0
+        for i in xrange(nD) :
+            i1, i2 = amico.lut.dir_TO_lut_idx( dirs[i] )
+            A[:,o:(o+n1*n4)] = KERNELS['wmr'][:,i1,i2,:].T
+            o += n1*n4
+        for i in xrange(nD) :
+            i1, i2 = amico.lut.dir_TO_lut_idx( dirs[i] )
+            A[:,o:(o+n1*n2*n4)] = KERNELS['wmh'][:,i1,i2,:].T
+            o += n1*n2*n4
+        A[:,o:] = KERNELS['iso'].T
+
+        # empty dictionary
+        if A.shape[1] == 0 :
+            return [0, 0, 0], None, None, None
+
+        # fit
+        x = spams.lasso( np.asfortranarray( y.reshape(-1,1) ), D=A, **params ).todense().A1
+
+        # return estimates
+        f1 = x[ :(nD*n1) ].sum()
+        f2 = x[ (nD*n1):(nD*(n1+n2)) ].sum()
+        v = f1 / ( f1 + f2 + 1e-16 )
+        xIC = x[:nD*n1].reshape(-1,n1).sum(axis=0)
+        # a = 1E6 * 2.0 * np.dot(self.Rs,xIC) / ( f1 + 1e-16 )
+        # d = (4.0*v) / ( np.pi*a**2 + 1e-16 )
+        # return [v, a, d], dirs, x, A
+        return [v], dirs, x, A
