@@ -301,9 +301,7 @@ class StickZeppelinBall( BaseModel ) :
         f2 = x[ (nD*n1):(nD*(n1+n2)) ].sum()
         v = f1 / ( f1 + f2 + 1e-16 )
         xIC = x[:nD*n1].reshape(-1,n1).sum(axis=0)
-        # a = 1E6 * 2.0 * np.dot(self.Rs,xIC) / ( f1 + 1e-16 )
-        # d = (4.0*v) / ( np.pi*a**2 + 1e-16 )
-        # return [v, a, d], dirs, x, A
+
         return [v], dirs, x, A
 
 
@@ -1282,13 +1280,15 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
     def __init__( self ) :
         self.id         = 'StickZeppelinBallDiffusivityT2'
         self.name       = 'Stick-Zeppelin-Ball-Diffusivity-T2'
-        self.maps_name  = [ 'v' ]
-        self.maps_descr = [ 'Intra-cellular volume fraction' ]
+        self.maps_name  = [ 'v', 'IC_d_par', 'IC_T2s']
+        self.maps_descr = [ 'Intra-cellular volume fraction', 'Intra-cellular parallel diffusivity', 'Intra-cellular T2']
+        # self.maps_name  = [ 'v', 'IC_d_par', 'IC_T2', 'EC_d_par', 'EC_d_par', 'EC_T2']
+        # self.maps_descr = [ 'Intra-cellular volume fraction', 'Intra-cellular parallel diffusivity', 'Intra-cellular T2', 'Extra-cellular parallel diffusivity', 'Extra-cellular volume fraction', 'Extra-cellular T2']
 
-        self.d_par  = np.array([ 1.2E-3, 1.7E-3 ])                    # Parallel diffusivity [mm^2/s]
-        self.ICVFs  = np.arange(0.3,0.9,0.1)    # Intra-cellular volume fraction(s) [0..1]
-        self.d_ISOs = np.array([ 3.0E-3 ])      # Isotropic diffusivitie(s) [mm^2/s]
-        self.T2s = np.array([ 104, 62 ])      # Isotropic diffusivitie(s) [mm^2/s]
+        self.d_par  = np.array([ 1.2E-3, 1.7E-3 ])  # Parallel diffusivity [mm^2/s]
+        self.ICVFs  = np.arange(0.3,0.9,0.1)        # Intra-cellular volume fraction(s) [0..1]
+        self.d_ISOs = np.array([ 3.0E-3 ])          # Isotropic diffusivitie(s) [mm^2/s]
+        self.T2s = np.array([ 104, 62 ])            # T2(s) [ms]
 
 
     def set( self, d_par, ICVFs, d_ISOs, T2s ) :
@@ -1309,7 +1309,6 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
 
     def generate( self, out_path, aux, idx_in, idx_out ) :
         scheme_high = amico.lut.create_high_resolution_scheme( self.scheme, b_scale=1 )
-        # gtab = gradient_table( scheme_high.b, scheme_high.raw[:,0:3] )
 
         nATOMS = len(self.d_par)*len(self.T2s) + len(self.ICVFs)*len(self.d_par)*len(self.T2s) + len(self.d_ISOs)
         progress = ProgressBar( n=nATOMS, prefix="   ", erase=True )
@@ -1393,7 +1392,7 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
         n2 = len(self.ICVFs)
         n3 = len(self.d_ISOs)
         n4 = len(self.T2s)
-        nATOMS = nD*n1*n4+ nD*n1*n2*n4+n3
+        nATOMS = nD*n1*n4 + nD*n1*n2*n4 + n3
 
         # prepare DICTIONARY from dirs and lookup tables
         A = np.ones( (len(y), nATOMS ), dtype=np.float64, order='F' )
@@ -1416,11 +1415,17 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
         x = spams.lasso( np.asfortranarray( y.reshape(-1,1) ), D=A, **params ).todense().A1
 
         # return estimates
-        f1 = x[ :(nD*n1) ].sum()
-        f2 = x[ (nD*n1):(nD*(n1+n2)) ].sum()
+        f1 = x[ :(nD*n1*n4) ].sum()
+        f2 = x[ (nD*n1*n4):(nD*n1*n2*n4) ].sum()
         v = f1 / ( f1 + f2 + 1e-16 )
-        xIC = x[:nD*n1].reshape(-1,n1).sum(axis=0)
-        # a = 1E6 * 2.0 * np.dot(self.Rs,xIC) / ( f1 + 1e-16 )
-        # d = (4.0*v) / ( np.pi*a**2 + 1e-16 )
-        # return [v, a, d], dirs, x, A
-        return [v], dirs, x, A
+
+        xIC = x[:nD*n1*n4].reshape(-1,n1*n4).sum(axis=0)
+        xIC_n1 = xIC.reshape(-1,n1).sum(axis=1)
+        IC_d_par = np.dot(self.d_par,xIC_n1) / ( f1 + 1e-16 )
+
+        xIC_n2 = np.zeros((len(self.T2s)))
+        for i in range(0, len(self.T2s)):
+            xIC_n2[i] = xIC[i::len(self.T2s)].sum()
+        IC_T2s = np.dot(self.d_par,xIC_n2) / ( f1 + 1e-16 )
+
+        return [v, IC_d_par, IC_T2s], dirs, x, A
