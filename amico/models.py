@@ -1419,13 +1419,12 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
         f2 = x[ (nD*n1*n4):(nD*n1*n2*n4) ].sum()
         v = f1 / ( f1 + f2 + 1e-16 )
 
-        xIC = x[:nD*n1*n4].reshape(-1,n1*n4).sum(axis=0)
-        xIC_n1 = xIC.reshape(-1,n1).sum(axis=1)
-        IC_d_par = np.dot(self.d_par,xIC_n1) / ( f1 + 1e-16 )
+        IC_T2s = x[:nD*n1*n4].reshape(-1,n4).sum(axis=0) / ( f1 + 1e-16 )
 
-        xIC_n2 = np.zeros((len(self.T2s)))
-        for i in range(0, len(self.T2s)):
-            xIC_n2[i] = xIC[i::len(self.T2s)].sum()
-        IC_T2s = np.dot(self.d_par,xIC_n2) / ( f1 + 1e-16 )
+        xIC_n1 = x[:nD*n1*n4].reshape(-1,n1*n4).sum(axis=0)
+        xIC_n2 = np.zeros((len(self.d_par)))
+        for i in range(0, len(self.d_par)):
+            xIC_n2[i] = xIC_n1[i::len(self.T2s)].sum()
+        IC_d_par = np.dot(self.d_par,xIC_n2) / ( f1 + 1e-16 )
 
         return [v, IC_d_par, IC_T2s], dirs, x, A
