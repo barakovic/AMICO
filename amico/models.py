@@ -1282,10 +1282,8 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
     def __init__( self ) :
         self.id         = 'StickZeppelinBallDiffusivityT2'
         self.name       = 'Stick-Zeppelin-Ball-Diffusivity-T2'
-        self.maps_name  = [ 'v', 'IC_d_par', 'IC_T2s']
-        self.maps_descr = [ 'Intra-cellular volume fraction', 'Intra-cellular parallel diffusivity', 'Intra-cellular T2']
-        # self.maps_name  = [ 'v', 'IC_d_par', 'IC_T2', 'EC_d_par', 'EC_d_par', 'EC_T2']
-        # self.maps_descr = [ 'Intra-cellular volume fraction', 'Intra-cellular parallel diffusivity', 'Intra-cellular T2', 'Extra-cellular parallel diffusivity', 'Extra-cellular volume fraction', 'Extra-cellular T2']
+        self.maps_name  = [ 'vIC', 'vEC', 'vISO', 'IC_d_par', 'IC_T2s', 'EC_d_par', 'EC_T2s']
+        self.maps_descr = [ 'Intra-cellular volume fraction', 'Extra-cellular volume fraction', 'Isotropic volume fraction', 'Intra-cellular parallel diffusivity', 'Intra-cellular T2', 'Extra-cellular parallel diffusivity', 'Extra-cellular T2']
 
         self.d_par  = np.array([ 1.2E-3, 1.7E-3 ])  # Parallel diffusivity [mm^2/s]
         self.ICVFs  = np.arange(0.3,0.9,0.1)        # Intra-cellular volume fraction(s) [0..1]
@@ -1419,14 +1417,19 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
         # return estimates
         f1 = x[ :(nD*n1*n4) ].sum()
         f2 = x[ (nD*n1*n4):(nD*n1*n2*n4) ].sum()
-        v = f1 / ( f1 + f2 + 1e-16 )
+        f3 = x[ (nD*n1*n2*n4): ].sum()
+        vIC = f1 / ( f1 + f2 + f3 + 1e-16 )
+        vEC = f2 / ( f1 + f2 + f3 + 1e-16 )
+        vISO = f3 / ( f1 + f2 + f3 + 1e-16 )
 
-        IC_T2s = x[:nD*n1*n4].reshape(-1,n4).sum(axis=0) / ( f1 + 1e-16 )
+        IC_T2s = np.dot( self.T2s, x[:nD*n1*n4].reshape(-1,n4).sum(axis=0) ) / ( f1 + 1e-16 )
 
         xIC_n1 = x[:nD*n1*n4].reshape(-1,n1*n4).sum(axis=0)
-        xIC_n2 = np.zeros((len(self.d_par)))
-        for i in range(0, len(self.d_par)):
-            xIC_n2[i] = xIC_n1[i::len(self.T2s)].sum()
-        IC_d_par = np.dot(self.d_par,xIC_n2) / ( f1 + 1e-16 )
+        IC_d_par = np.dot( self.d_par, xIC_n1.reshape(-1,n4).sum(axis=1) ) / ( f1 + 1e-16 )
 
-        return [v, IC_d_par, IC_T2s], dirs, x, A
+        EC_T2s = np.dot( self.T2s, x[(nD*n1*n4):(nD*n1*n2*n4)].reshape(-1,n4).sum(axis=0) ) / ( f2 + 1e-16 )
+
+        xEC_n1 = x[(nD*n1*n4):(nD*n1*n2*n4)].reshape(-1,n1*n2*n4).sum(axis=0)
+        EC_d_par = np.dot( self.d_par, xEC_n1.reshape(-1,n2*n4).sum(axis=1) ) / ( f2 + 1e-16 )
+
+        return [vIC, vEC, vISO, IC_d_par, IC_T2s, IC_d_par, IC_T2s], dirs, x, A
