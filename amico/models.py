@@ -1430,4 +1430,4 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
         xEC_n1 = x[(nD*n1*n4):(nD*n1*n2*n4)].reshape(-1,n1*n2*n4).sum(axis=0)
         EC_d_par = np.dot( self.d_par, xEC_n1.reshape(-1,n2*n4).sum(axis=1) ) / ( f2 + 1e-16 )
 
-        return [vIC, vEC, vISO, IC_d_par, IC_T2s, IC_d_par, IC_T2s], dirs, x, A
+        return [vIC, vEC, vISO, IC_d_par, IC_T2s, EC_d_par, EC_T2s], dirs, x, A
