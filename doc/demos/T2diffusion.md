@@ -9,10 +9,12 @@ import sys
 
 filename_bval = 'file.bval'
 filename_bvec = 'file.bvec'
+filename_TE = 'TE.txt'
 filename_output = 'dwi'
 
 bval = np.loadtxt( filename_bval )
 bvec = np.loadtxt( filename_bvec )
+bvec = np.loadtxt( filename_TE )
 
 # create StejskalTanner
 smallDelta = 0.007
