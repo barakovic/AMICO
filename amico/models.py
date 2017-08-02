@@ -1414,20 +1414,24 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
 
         # return estimates
         f1 = x[ :(nD*n1*n4) ].sum()
-        f2 = x[ (nD*n1*n4):(nD*n1*n2*n4) ].sum()
-        f3 = x[ (nD*n1*n2*n4): ].sum()
+        f2 = x[ (nD*n1*n4):(nD*n1*n2*n4)+(nD*n1*n4) ].sum()
+        f3 = x[ (nD*n1*n2*n4)+(nD*n1*n4): ].sum()
         vIC = f1 / ( f1 + f2 + f3 + 1e-16 )
         vEC = f2 / ( f1 + f2 + f3 + 1e-16 )
         vISO = f3 / ( f1 + f2 + f3 + 1e-16 )
 
-        IC_T2s = np.dot( self.T2s, x[:nD*n1*n4].reshape(-1,n4).sum(axis=0) ) / ( f1 + 1e-16 )
-
         xIC_n1 = x[:nD*n1*n4].reshape(-1,n1*n4).sum(axis=0)
-        IC_d_par = np.dot( self.d_par, xIC_n1.reshape(-1,n4).sum(axis=1) ) / ( f1 + 1e-16 )
+        xIC_n2 = xIC_n1.reshape(-1,n4).sum(axis=1)
+        IC_d_par = np.dot( self.d_par, xIC_n2 ) / ( f1 + 1e-16 )
 
-        EC_T2s = np.dot( self.T2s, x[(nD*n1*n4):(nD*n1*n2*n4)].reshape(-1,n4).sum(axis=0) ) / ( f2 + 1e-16 )
+        xIC_n3 = x[:nD*n1*n4].reshape(-1,n4).sum(axis=0)
+        IC_T2s = np.dot( self.T2s, xIC_n3 ) / ( f1 + 1e-16 )
 
-        xEC_n1 = x[(nD*n1*n4):(nD*n1*n2*n4)].reshape(-1,n1*n2*n4).sum(axis=0)
-        EC_d_par = np.dot( self.d_par, xEC_n1.reshape(-1,n2*n4).sum(axis=1) ) / ( f2 + 1e-16 )
+        xEC_n1 = x[(nD*n1*n4):(nD*n1*n2*n4)+(nD*n1*n4)].reshape(-1,n1*n2*n4).sum(axis=0)
+        xEC_n2 = xEC_n1.reshape(-1,n2*n4).sum(axis=1)
+        EC_d_par = np.dot( self.d_par, xEC_n2 ) / ( f2 + 1e-16 )
+
+        xEC_n3 = x[(nD*n1*n4):(nD*n1*n2*n4)+(nD*n1*n4)].reshape(-1,n4).sum(axis=0)
+        EC_T2s = np.dot( self.T2s, xEC_n3 ) / ( f2 + 1e-16 )
 
         return [vIC, vEC, vISO, IC_d_par, IC_T2s, EC_d_par, EC_T2s], dirs, x, A
