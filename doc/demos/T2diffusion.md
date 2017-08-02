@@ -41,12 +41,13 @@ ae.set_config('doNormalizeSignal', False)
 ae.set_config('doComputeNRMSE', True)
 ae.load_data(dwi_filename = "file_DWIs.nii", scheme_filename = "dwi.scheme", b0_thr = 0)
 
-ae.d_par  = np.array([ 2.42E-3, 2.13E-3 ])      # Parallel diffusivity [mm^2/s]
-ae.ICVFs  = np.arange(0.3,0.9,0.1)              # Intra-cellular volume fraction(s) [0..1]
-ae.d_ISOs = np.array([ 3.0E-3 ])                # Isotropic diffusivitie(s) [mm^2/s]
-ae.T2s = np.array([ 104, 62 ])                  # T2 list [s]
+d_par  = np.array([ 2.42E-3, 2.13E-3 ])      # Parallel diffusivity [mm^2/s]
+ICVFs  = np.arange(0.3,0.9,0.1)              # Intra-cellular volume fraction(s) [0..1]
+d_ISOs = np.array([ 3.0E-3 ])                # Isotropic diffusivitie(s) [mm^2/s]
+T2s = np.array([ 104, 62 ])                  # T2 list [s]
 
-ae.set_model("StickZeppelinBallDiffusivityT2")
+ae.set_model( "StickZeppelinBallDiffusivityT2" )
+ae.model.set( d_par, ICVFs, d_ISOs, T2s )
 ae.generate_kernels( regenerate = True )
 
 ae.load_kernels()
