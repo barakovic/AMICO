@@ -14,7 +14,7 @@ filename_output = 'dwi'
 
 bval = np.loadtxt( filename_bval )
 bvec = np.loadtxt( filename_bvec )
-bvec = np.loadtxt( filename_TE )
+TE = np.loadtxt( filename_TE )
 
 # create StejskalTanner
 smallDelta = 0.007
