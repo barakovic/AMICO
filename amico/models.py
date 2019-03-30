@@ -183,12 +183,12 @@ class StickZeppelinBall( BaseModel ) :
     def __init__( self ) :
         self.id         = 'StickZeppelinBall'
         self.name       = 'Stick-Zeppelin-Ball'
-        self.maps_name  = [ 'v' ]
-        self.maps_descr = [ 'Intra-cellular volume fraction' ]
+        self.maps_name  = [ 'iasf', 'easf' ]
+        self.maps_descr = [ 'Intra-axonal signal fraction', 'Extra-axonal signal fraction' ]
 
-        self.d_par  = 1.7E-3                    # Parallel diffusivity [mm^2/s]
+        self.d_par  = 2.0E-3                    # Parallel diffusivity [mm^2/s]
         self.ICVFs  = np.arange(0.3,0.9,0.1)    # Intra-cellular volume fraction(s) [0..1]
-        self.d_ISOs = np.array([ 3.0E-3 ])      # Isotropic diffusivitie(s) [mm^2/s]
+        self.d_ISOs = np.array([])      # Isotropic diffusivitie(s) [mm^2/s]
 
 
     def set( self, d_par, ICVFs, d_ISOs ) :
@@ -197,7 +197,7 @@ class StickZeppelinBall( BaseModel ) :
         self.d_ISOs = np.array( d_ISOs )
 
 
-    def set_solver( self, lambda1 = 0.0, lambda2 = 4.0 ) :
+    def set_solver( self, lambda1 = 0.0, lambda2 = 0.0 ) :
         params = {}
         params['mode']    = 2
         params['pos']     = True
@@ -299,10 +299,11 @@ class StickZeppelinBall( BaseModel ) :
         # return estimates
         f1 = x[ :(nD*n1) ].sum()
         f2 = x[ (nD*n1):(nD*(n1+n2)) ].sum()
-        v = f1 / ( f1 + f2 + 1e-16 )
+        iasf = f1 / ( f1 + f2 + 1e-16 )
+	easf = f2 / ( f1 + f2 + 1e-16 )
         xIC = x[:nD*n1].reshape(-1,n1).sum(axis=0)
 
-        return [v], dirs, x, A
+        return [iasf, easf], dirs, x, A
 
 
 
