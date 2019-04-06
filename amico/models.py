@@ -166,14 +166,12 @@ class BaseModel( object ) :
 
 class StickZeppelinBall( BaseModel ) :
     """Implements the Stick-Zeppelin-Ball model [1].
-
     The intra-cellular contributions from within the axons are modeled as "sticks", i.e.
     tensors with a given axial diffusivity (d_par) but null perpendicular diffusivity.
     Extra-cellular contributions are modeled as tensors with the same axial diffusivity
     as the sticks (d_par) and whose perpendicular diffusivities are calculated with a
     tortuosity model as a function of the intra-cellular volume fractions (ICVFs).
     Isotropic contributions are modeled as tensors with isotropic diffusivities (d_ISOs).
-
     References
     ----------
     .. [1] Panagiotaki et al. (2012) Compartment models of the diffusion MR signal
@@ -183,12 +181,12 @@ class StickZeppelinBall( BaseModel ) :
     def __init__( self ) :
         self.id         = 'StickZeppelinBall'
         self.name       = 'Stick-Zeppelin-Ball'
-        self.maps_name  = [ 'iasf', 'easf' ]
-        self.maps_descr = [ 'Intra-axonal signal fraction', 'Extra-axonal signal fraction' ]
+        self.maps_name  = [ ]
+        self.maps_descr = [ ]
 
-        self.d_par  = 2.0E-3                    # Parallel diffusivity [mm^2/s]
+        self.d_par  = 1.7E-3                    # Parallel diffusivity [mm^2/s]
         self.ICVFs  = np.arange(0.3,0.9,0.1)    # Intra-cellular volume fraction(s) [0..1]
-        self.d_ISOs = np.array([])      # Isotropic diffusivitie(s) [mm^2/s]
+        self.d_ISOs = np.array([ 3.0E-3 ])      # Isotropic diffusivitie(s) [mm^2/s]
 
 
     def set( self, d_par, ICVFs, d_ISOs ) :
@@ -197,13 +195,8 @@ class StickZeppelinBall( BaseModel ) :
         self.d_ISOs = np.array( d_ISOs )
 
 
-    def set_solver( self, lambda1 = 0.0, lambda2 = 0.0 ) :
-        params = {}
-        params['mode']    = 2
-        params['pos']     = True
-        params['lambda1'] = lambda1
-        params['lambda2'] = lambda2
-        return params
+    def set_solver( self ) :
+        raise NotImplementedError
 
 
     def generate( self, out_path, aux, idx_in, idx_out ) :
@@ -271,11 +264,132 @@ class StickZeppelinBall( BaseModel ) :
 
 
     def fit( self, y, dirs, KERNELS, params ) :
+        raise NotImplementedError
+
+
+
+class StickZeppelinBallDiffusivity( BaseModel ) :
+    """Implements the Stick-Zeppelin-Ball model [1].
+
+    The intra-cellular contributions from within the axons are modeled as "sticks", i.e.
+    tensors with a given axial diffusivity (d_par) but null perpendicular diffusivity.
+    Extra-cellular contributions are modeled as tensors with the same axial diffusivity
+    as the sticks (d_par) and whose perpendicular diffusivities are calculated with a
+    tortuosity model as a function of the intra-cellular volume fractions (ICVFs).
+    Isotropic contributions are modeled as tensors with isotropic diffusivities (d_ISOs).
+
+    References
+    ----------
+    .. [1] Panagiotaki et al. (2012) Compartment models of the diffusion MR signal
+           in brain white matter: A taxonomy and comparison. NeuroImage, 59: 2241-54
+    """
+
+    def __init__( self ) :
+        self.id         = 'StickZeppelinBallDiffusivity'
+        self.name       = 'Stick-Zeppelin-Ball-Diffusivity'
+        self.maps_name  = [ 'iasf', 'easf', 'isf', 'd_par_a', 'd_par_e', 'd_perp_e', 'd_iso']
+        self.maps_descr = [ 'Intra-axonal signal fraction', 'Extra-axonal signal fraction', 'Isotropic signal fraction', 'Parallel diffusivity intra', 'Parallel diffusivity extra', 'Perpendicular diffusivity extra', 'Isotropic diffusivity']
+
+        self.d_par_a  = np.array([ 1.5E-3, 2.0E-3, 2.5E-3 ])        # Parallel diffusivity intra [mm^2/s]
+        self.d_par_e  = np.array([ 1.5E-3, 2.0E-3, 2.5E-3 ])        # Parallel diffusivity extra [mm^2/s]
+	self.d_per_e  = np.array([ 0.5E-3, 1.0E-3, 1.5E-3, 2.0E-3]) # Perpendicular diffusivity extra [mm^2/s]	
+
+        self.d_iso = np.array([])                                   # Isotropic diffusivity [mm^2/s]
+
+
+    def set( self, d_par_a, d_par_e, d_per_e, d_iso ) :
+        self.d_par_a  = np.array( d_par_a )
+        self.d_par_e  = np.array( d_par_e )
+        self.d_per_e  = np.array( d_per_e )
+
+        self.d_iso = np.array( d_iso )
+
+
+    def set_solver( self, lambda1 = 0.0, lambda2 = 0.0 ) :
+        params = {}
+        params['mode']    = 2
+        params['pos']     = True
+        params['lambda1'] = lambda1
+        params['lambda2'] = lambda2
+        return params
+
+
+    def generate( self, out_path, aux, idx_in, idx_out ) :
+        scheme_high = amico.lut.create_high_resolution_scheme( self.scheme, b_scale=1 )
+        gtab = gradient_table( scheme_high.b, scheme_high.raw[:,0:3] )
+
+        nATOMS = len(self.d_par_a) + len(self.d_par_e) * len(self.d_per_e) + len(self.d_iso)
+        progress = ProgressBar( n=nATOMS, prefix="   ", erase=True )
+
+        # Stick(s)
+        for d in self.d_par_a :
+            signal = single_tensor( gtab, evals=[0, 0, d] )
+            lm = amico.lut.rotate_kernel( signal, aux, idx_in, idx_out, False )
+            np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
+            progress.update()
+
+        # Zeppelin(s)
+        for d in self.d_par_e : 
+            for d1 in self.d_per_e :
+                signal = single_tensor( gtab, evals=[d1, d1, d] )
+                lm = amico.lut.rotate_kernel( signal, aux, idx_in, idx_out, False )
+                np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
+                progress.update()
+
+        # Ball(s)
+        for d in self.d_iso :
+            signal = single_tensor( gtab, evals=[d, d, d] )
+            lm = amico.lut.rotate_kernel( signal, aux, idx_in, idx_out, True )
+            np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
+            progress.update()
+
+
+    def resample( self, in_path, idx_out, Ylm_out, doMergeB0 ) :
+        KERNELS = {}
+        KERNELS['model'] = self.id
+        if doMergeB0:
+            nS = 1+self.scheme.dwi_count
+            merge_idx = np.hstack((self.scheme.b0_idx[0],self.scheme.dwi_idx))
+        else:
+            nS = self.scheme.nS
+            merge_idx = np.arange(nS)
+        KERNELS['wmr']   = np.zeros( (len(self.d_par_a),181,181,nS), dtype=np.float32 )
+        KERNELS['wmh']   = np.zeros( (len(self.d_par_e) * len(self.d_per_e),181,181,nS), dtype=np.float32 )
+        KERNELS['iso']   = np.zeros( (len(self.d_iso),nS), dtype=np.float32 )
+
+        nATOMS = len(self.d_par_a) + len(self.d_par_e) * len(self.d_per_e) + len(self.d_iso)
+        progress = ProgressBar( n=nATOMS, prefix="   ", erase=True )
+
+        # Stick(s)
+        for i in xrange(len(self.d_par_a)) :
+            lm = np.load( pjoin( in_path, 'A_%03d.npy'%progress.i ) )
+            KERNELS['wmr'][i,...] = amico.lut.resample_kernel( lm, self.scheme.nS, idx_out, Ylm_out, False )[:,:,merge_idx]
+            progress.update()
+
+        # Zeppelin(s)
+        for i in xrange(len(self.d_par_e) * len(self.d_per_e)) :
+            lm = np.load( pjoin( in_path, 'A_%03d.npy'%progress.i ) )
+            KERNELS['wmh'][i,...] = amico.lut.resample_kernel( lm, self.scheme.nS, idx_out, Ylm_out, False )[:,:,merge_idx]
+            progress.update()
+
+        # Ball(s)
+        for i in xrange(len(self.d_iso)) :
+            lm = np.load( pjoin( in_path, 'A_%03d.npy'%progress.i ) )
+            KERNELS['iso'][i,...] = amico.lut.resample_kernel( lm, self.scheme.nS, idx_out, Ylm_out, True )[merge_idx]
+            progress.update()
+
+        return KERNELS
+
+
+    def fit( self, y, dirs, KERNELS, params ) :
         nD = dirs.shape[0]
-        n1 = 1
-        n2 = len(self.ICVFs)
-        n3 = len(self.d_ISOs)
-        nATOMS = nD*(n1+n2)+n3
+        n1 = len(self.d_par_a)
+        n2 = len(self.d_par_e)
+        n3 = len(self.d_per_e)
+        n4 = len(self.d_iso)
+
+        nATOMS = (nD*n1)+(nD*n2*n3)+n4
+
         # prepare DICTIONARY from dirs and lookup tables
         A = np.ones( (len(y), nATOMS ), dtype=np.float64, order='F' )
         o = 0
@@ -285,8 +399,8 @@ class StickZeppelinBall( BaseModel ) :
             o += n1
         for i in xrange(nD) :
             i1, i2 = amico.lut.dir_TO_lut_idx( dirs[i] )
-            A[:,o:(o+n2)] = KERNELS['wmh'][:,i1,i2,:].T
-            o += n2
+            A[:,o:(o+n2*n3)] = KERNELS['wmh'][:,i1,i2,:].T
+            o += n2*n3
         A[:,o:] = KERNELS['iso'].T
 
         # empty dictionary
@@ -298,12 +412,30 @@ class StickZeppelinBall( BaseModel ) :
 
         # return estimates
         f1 = x[ :(nD*n1) ].sum()
-        f2 = x[ (nD*n1):(nD*(n1+n2)) ].sum()
-        iasf = f1 / ( f1 + f2 + 1e-16 )
-	easf = f2 / ( f1 + f2 + 1e-16 )
-        xIC = x[:nD*n1].reshape(-1,n1).sum(axis=0)
+        f2 = x[ (nD*n1):(nD*n1)+(nD*n2*n3)].sum()
+        f3 = x[ (nD*n1)+(nD*n2*n3): ].sum()
 
-        return [iasf, easf], dirs, x, A
+        iasf = f1 / ( f1 + f2 + f3 + 1e-16 )
+	easf = f2 / ( f1 + f2 + f3 + 1e-16 )
+	isf = f3 / ( f1 + f2 + f3 + 1e-16 )
+
+	xIC = x[:nD*n1].reshape(-1,n1).sum(axis=0)
+	d_par_a = np.dot( self.d_par_a, xIC ) / ( f1 + 1e-16 )
+
+        xEC_n1 = x[(nD*n1):(nD*n1)+(nD*n2*n3)].reshape(-1,n2*n3).sum(axis=0)
+        xEC_n2 = xEC_n1.reshape(-1,n3).sum(axis=1)
+        d_par_e = np.dot( self.d_par_e, xEC_n2 ) / ( f2 + 1e-16 )
+
+        xEC_n3 = x[(nD*n1):(nD*n1)+(nD*n2*n3)].reshape(-1,n3).sum(axis=0)
+        d_per_e = np.dot( self.d_per_e, xEC_n3 ) / ( f2 + 1e-16 )
+
+        if n4 !=0:
+            xISO = x[(nD*n1)+(nD*n2*n3):].reshape(-1,n4).sum(axis=0)
+            d_iso = np.dot( self.d_iso, xISO ) / ( f3 + 1e-16 )
+        else:
+            d_iso = 0
+
+        return [iasf, easf, isf, d_par_a, d_par_e, d_per_e, d_iso], dirs, x, A
 
 
 

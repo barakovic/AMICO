@@ -312,7 +312,6 @@ class Evaluation :
                 for ix in xrange(self.niiMASK_img.shape[0]) :
                     if self.niiMASK_img[ix,iy,iz]==0 :
                         continue
-
                     # prepare the signal
                     y = self.niiDWI_img[ix,iy,iz,:].astype(np.float64)
                     y[ y < 0 ] = 0 # [NOTE] this should not happen!
