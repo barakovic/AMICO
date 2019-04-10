@@ -1395,6 +1395,7 @@ class VolumeFractions( BaseModel ) :
 
 
 class StickZeppelinBallDiffusivityT2( BaseModel ) :
+# model limitated by the fact that T2 isotropic is not implemented
     """Implements the Stick-Zeppelin-Ball model [1].
 
     The intra-cellular contributions from within the axons are modeled as "sticks", i.e.
@@ -1413,23 +1414,26 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
     def __init__( self ) :
         self.id         = 'StickZeppelinBallDiffusivityT2'
         self.name       = 'Stick-Zeppelin-Ball-Diffusivity-T2'
-        self.maps_name  = [ 'vIC', 'vEC', 'vISO', 'IC_d_par', 'IC_T2s', 'EC_d_par', 'EC_T2s']
-        self.maps_descr = [ 'Intra-cellular volume fraction', 'Extra-cellular volume fraction', 'Isotropic volume fraction', 'Intra-cellular parallel diffusivity', 'Intra-cellular T2', 'Extra-cellular parallel diffusivity', 'Extra-cellular T2']
-
-        self.d_par  = np.array([ 1.2E-3, 1.7E-3 ])  # Parallel diffusivity [mm^2/s]
-        self.ICVFs  = np.arange(0.3,0.9,0.1)        # Intra-cellular volume fraction(s) [0..1]
-        self.d_ISOs = np.array([ 3.0E-3 ])          # Isotropic diffusivitie(s) [mm^2/s]
-        self.T2s = np.array([ 104, 62 ])            # T2(s) [ms]
+        self.maps_name  = [ 'iasf', 'easf', 'isf', 'd_par_a', 'd_par_e', 'd_per_e', 'd_iso', 'ia_T2', 'ea_T2'] #, 
+        self.maps_descr = [ 'Intra-axonal signal fraction', 'Extra-axonal signal fraction', 'Isotropic signal fraction', 'Intra-axonal parallel diffusivity',  'Extra-axonal parallel diffusivity', 'Extra-axonal perpendicular diffusivity', 'Isotropic diffusivity',  'Intra-axonal T2', 'Extra-axonal T2']
 
 
-    def set( self, d_par, ICVFs, d_ISOs, T2s ) :
-        self.d_par  = np.array( d_par )
-        self.ICVFs  = np.array( ICVFs )
-        self.d_ISOs = np.array( d_ISOs )
-        self.T2s = np.array( T2s )
+        self.d_par_a  = np.array([ 1.5E-3, 2.0E-3, 2.5E-3 ])         # Parallel diffusivity intra [mm^2/s]
+        self.d_par_e  = np.array([ 1.5E-3, 2.0E-3, 2.5E-3 ])         # Parallel diffusivity extra [mm^2/s]
+        self.d_per_e  = np.array([ 0.5E-3, 1.0E-3, 1.5E-3, 2.0E-3 ]) # Perpendicular diffusivity extra [mm^2/s]
+        self.d_iso = np.array([])                                    # Isotropic diffusivity [mm^2/s]
+        self.T2 = np.array([ 40, 60, 80, 100, 120 ])                 # T2(s) [ms]
 
 
-    def set_solver( self, lambda1 = 0.0, lambda2 = 4.0 ) :
+    def set( self, d_par_a, d_par_e, d_per_e, d_iso, T2 ) :
+        self.d_par_a  = np.array( d_par_a )
+        self.d_par_e  = np.array( d_par_e )
+        self.d_per_e  = np.array( d_per_e )
+        self.d_iso = np.array( d_iso )
+        self.T2 = np.array( T2 )
+
+
+    def set_solver( self, lambda1 = 0.0, lambda2 = 0.0 ) :
         params = {}
         params['mode']    = 2
         params['pos']     = True
@@ -1441,39 +1445,31 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
     def generate( self, out_path, aux, idx_in, idx_out ) :
         scheme_high = amico.lut.create_high_resolution_scheme( self.scheme, b_scale=1 )
 
-        nATOMS = len(self.d_par)*len(self.T2s) + len(self.ICVFs)*len(self.d_par)*len(self.T2s) + len(self.d_ISOs)
+        nATOMS = len(self.d_par_a)*len(self.T2) + len(self.d_par_e)*len(self.d_per_e)*len(self.T2) + len(self.d_iso)
         progress = ProgressBar( n=nATOMS, prefix="   ", erase=True )
 
         # Stick
-        for d in self.d_par :
-            for d1 in self.T2s :
-                gtab = gradient_table( np.ones(scheme_high.shells[0]['grad'].shape[0])*scheme_high.shells[0]['b'], scheme_high.shells[0]['grad'] )
-                final_signal = np.exp( -(scheme_high.shells[0]['TE']/d1) ) * single_tensor( gtab, evals=[0, 0, d] )
-                for d2 in xrange( 1, len(scheme_high.shells) ) :
-                    gtab = gradient_table( np.ones(scheme_high.shells[d2]['grad'].shape[0])*scheme_high.shells[d2]['b'], scheme_high.shells[d2]['grad'] )
-                    temp_signal = np.exp( -(scheme_high.shells[d2]['TE']/d1) ) * single_tensor( gtab, evals=[0, 0, d] )
-                    final_signal = np.hstack( (final_signal, temp_signal) )
-                lm = amico.lut.rotate_kernel( final_signal, aux, idx_in, idx_out, False )
+        for d in self.d_par_a :
+            for d1 in self.T2 :
+                gtab = gradient_table( scheme_high.b, scheme_high.raw[:,0:3] )
+                signal = single_tensor( gtab, evals=[0, 0, d] )
+                lm = amico.lut.rotate_kernel( signal, aux, idx_in, idx_out, False )
                 np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
                 progress.update()
 
         # Zeppelin(s)
-        for d in self.d_par :
-            for d1 in [ d*(1.0-ICVF) for ICVF in self.ICVFs] :
-                for d2 in self.T2s :
-                    gtab = gradient_table( np.ones(scheme_high.shells[0]['grad'].shape[0])*scheme_high.shells[0]['b'], scheme_high.shells[0]['grad'] )
-                    final_signal =  np.exp( -(scheme_high.shells[0]['TE']/d2) ) * single_tensor( gtab, evals=[d1, d1, d] )
-                    for d3 in xrange(1, len(scheme_high.shells)) :
-                        gtab = gradient_table( np.ones(scheme_high.shells[d3]['grad'].shape[0])*scheme_high.shells[d3]['b'], scheme_high.shells[d3]['grad'] )
-                        temp_signal = np.exp( -(scheme_high.shells[d3]['TE']/d2) ) * single_tensor( gtab, evals=[d1, d1, d] )
-                        final_signal = np.hstack( (final_signal, temp_signal) )
-                    lm = amico.lut.rotate_kernel( final_signal, aux, idx_in, idx_out, False )
+        for d in self.d_par_e :
+            for d1 in self.d_per_e :
+                for d2 in self.T2 :
+                    gtab = gradient_table( scheme_high.b, scheme_high.raw[:,0:3] )
+                    signal = np.exp( -(scheme_high.raw[:,6]/d2)) * single_tensor( gtab, evals=[d1, d1, d] )
+                    lm = amico.lut.rotate_kernel( signal, aux, idx_in, idx_out, False )
                     np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
                     progress.update()
 
         # Ball(s)
         gtab = gradient_table( scheme_high.b, scheme_high.raw[:,0:3] )
-        for d in self.d_ISOs :
+        for d in self.d_iso :
             signal = single_tensor( gtab, evals=[d, d, d] )
             lm = amico.lut.rotate_kernel( signal, aux, idx_in, idx_out, True )
             np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
@@ -1489,27 +1485,32 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
         else:
             nS = self.scheme.nS
             merge_idx = np.arange(nS)
-        KERNELS['wmr']   = np.zeros( (len(self.d_par)*len(self.T2s),181,181,nS), dtype=np.float32 )
-        KERNELS['wmh']   = np.zeros( (len(self.ICVFs)*len(self.d_par)*len(self.T2s),181,181,nS), dtype=np.float32 )
-        KERNELS['iso']   = np.zeros( (len(self.d_ISOs),nS), dtype=np.float32 )
+        KERNELS['wmr']   = np.zeros( (len(self.d_par_a)*len(self.T2),181,181,nS), dtype=np.float32 )
+        KERNELS['wmh']   = np.zeros( (len(self.d_par_e)*len(self.d_per_e)*len(self.T2),181,181,nS), dtype=np.float32 )
+        KERNELS['iso']   = np.zeros( (len(self.d_iso),nS), dtype=np.float32 )
 
-        nATOMS = len(self.d_par)*len(self.T2s) + len(self.ICVFs)*len(self.d_par)*len(self.T2s) + len(self.d_ISOs)
+        nATOMS = len(self.d_par_a)*len(self.T2) + len(self.d_par_e)*len(self.d_per_e)*len(self.T2) + len(self.d_iso)
         progress = ProgressBar( n=nATOMS, prefix="   ", erase=True )
 
         # Stick(s)
-        for i in xrange(len(self.d_par)*len(self.T2s)) :
-            lm = np.load( pjoin( in_path, 'A_%03d.npy'%progress.i ) )
-            KERNELS['wmr'][i,...] = amico.lut.resample_kernel( lm, self.scheme.nS, idx_out, Ylm_out, False )[:,:,merge_idx]
-            progress.update()
+        for d in range(len(self.d_par_a)) :
+            for d1 in range(len(self.T2)) :
+                j = d1+ d*len(self.T2)
+                lm = np.load( pjoin( in_path, 'A_%03d.npy'%progress.i ) )
+                KERNELS['wmr'][j,...] = amico.lut.resample_kernel( lm, self.scheme.nS, idx_out, Ylm_out, False )[:,:,merge_idx] * np.repeat(np.exp( -(self.scheme.raw[:,6]/self.T2[d1])), 181*181,axis=0).reshape(-1,181,181).T
+                progress.update()
 
         # Zeppelin(s)
-        for i in xrange(len(self.ICVFs)*len(self.d_par)*len(self.T2s)) :
-            lm = np.load( pjoin( in_path, 'A_%03d.npy'%progress.i ) )
-            KERNELS['wmh'][i,...] = amico.lut.resample_kernel( lm, self.scheme.nS, idx_out, Ylm_out, False )[:,:,merge_idx]
-            progress.update()
+        for d in range(len(self.d_par_e)) :
+            for d1 in range(len(self.d_per_e)) :
+                for d2 in range(len(self.T2)) :
+                    j = d2 + d1*len(self.T2) + d*len(self.T2)*len(self.d_per_e)
+                    lm = np.load( pjoin( in_path, 'A_%03d.npy'%progress.i ) )
+                    KERNELS['wmh'][j,...] = amico.lut.resample_kernel( lm, self.scheme.nS, idx_out, Ylm_out, False )[:,:,merge_idx] * np.repeat(np.exp( -(self.scheme.raw[:,6]/self.T2[d2])), 181*181,axis=0).reshape(-1,181,181).T
+                    progress.update()
 
         # Ball(s)
-        for i in xrange(len(self.d_ISOs)) :
+        for i in xrange(len(self.d_iso)) :
             lm = np.load( pjoin( in_path, 'A_%03d.npy'%progress.i ) )
             KERNELS['iso'][i,...] = amico.lut.resample_kernel( lm, self.scheme.nS, idx_out, Ylm_out, True )[merge_idx]
             progress.update()
@@ -1519,23 +1520,24 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
 
     def fit( self, y, dirs, KERNELS, params ) :
         nD = dirs.shape[0]
-        n1 = len(self.d_par)
-        n2 = len(self.ICVFs)
-        n3 = len(self.d_ISOs)
-        n4 = len(self.T2s)
-        nATOMS = nD*n1*n4 + nD*n1*n2*n4 + n3
+        n1 = len(self.d_par_a)
+        n2 = len(self.d_par_e)
+        n3 = len(self.d_per_e)
+        n4 = len(self.d_iso)
+        n5 = len(self.T2)
+        nATOMS = nD*n1*n5 + nD*n2*n3*n5 + n4
 
         # prepare DICTIONARY from dirs and lookup tables
         A = np.ones( (len(y), nATOMS ), dtype=np.float64, order='F' )
         o = 0
         for i in xrange(nD) :
             i1, i2 = amico.lut.dir_TO_lut_idx( dirs[i] )
-            A[:,o:(o+n1*n4)] = KERNELS['wmr'][:,i1,i2,:].T
-            o += n1*n4
+            A[:,o:(o+n1*n5)] = KERNELS['wmr'][:,i1,i2,:].T
+            o += n1*n5
         for i in xrange(nD) :
             i1, i2 = amico.lut.dir_TO_lut_idx( dirs[i] )
-            A[:,o:(o+n1*n2*n4)] = KERNELS['wmh'][:,i1,i2,:].T
-            o += n1*n2*n4
+            A[:,o:(o+n2*n3*n5)] = KERNELS['wmh'][:,i1,i2,:].T
+            o += n2*n3*n5
         A[:,o:] = KERNELS['iso'].T
 
         # empty dictionary
@@ -1546,25 +1548,34 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
         x = spams.lasso( np.asfortranarray( y.reshape(-1,1) ), D=A, **params ).todense().A1
 
         # return estimates
-        f1 = x[ :(nD*n1*n4) ].sum()
-        f2 = x[ (nD*n1*n4):(nD*n1*n2*n4)+(nD*n1*n4) ].sum()
-        f3 = x[ (nD*n1*n2*n4)+(nD*n1*n4): ].sum()
-        vIC = f1 / ( f1 + f2 + f3 + 1e-16 )
-        vEC = f2 / ( f1 + f2 + f3 + 1e-16 )
-        vISO = f3 / ( f1 + f2 + f3 + 1e-16 )
+        f1 = x[ :(nD*n1*n5) ].sum()
+        f2 = x[ (nD*n1*n5):(nD*n2*n3*n5)+(nD*n1*n5) ].sum()
+        f3 = x[ (nD*n2*n3*n5)+(nD*n1*n5): ].sum()
+        iasf = f1 / ( f1 + f2 + f3 + 1e-16 )
+        easf = f2 / ( f1 + f2 + f3 + 1e-16 )
+        isf = f3 / ( f1 + f2 + f3 + 1e-16 )
 
-        xIC_n1 = x[:nD*n1*n4].reshape(-1,n1*n4).sum(axis=0)
-        xIC_n2 = xIC_n1.reshape(-1,n4).sum(axis=1)
-        IC_d_par = np.dot( self.d_par, xIC_n2 ) / ( f1 + 1e-16 )
+        xIC_n1 = x[:nD*n1*n5].reshape(-1,n1*n5).sum(axis=0)
+        xIC_n2 = xIC_n1.reshape(-1,n5).sum(axis=1)
+        d_par_a = np.dot( self.d_par_a, xIC_n2 ) / ( f1 + 1e-16 ) * 1000
 
-        xIC_n3 = x[:nD*n1*n4].reshape(-1,n4).sum(axis=0)
-        IC_T2s = np.dot( self.T2s, xIC_n3 ) / ( f1 + 1e-16 )
+        xIC_n3 = x[:nD*n1*n5].reshape(-1,n5).sum(axis=0)
+        ia_T2 = np.dot( self.T2, xIC_n3 ) / ( f1 + 1e-16 ) * 1000
 
-        xEC_n1 = x[(nD*n1*n4):(nD*n1*n2*n4)+(nD*n1*n4)].reshape(-1,n1*n2*n4).sum(axis=0)
-        xEC_n2 = xEC_n1.reshape(-1,n2*n4).sum(axis=1)
-        EC_d_par = np.dot( self.d_par, xEC_n2 ) / ( f2 + 1e-16 )
+        xEC_n1 = x[ (nD*n1*n5):(nD*n2*n3*n5)+(nD*n1*n5) ].reshape(-1,n2*n3*n5).sum(axis=0)
+        xEC_n2 = xEC_n1.reshape(-1,n2*n5).sum(axis=1)
+        d_par_e = np.dot( self.d_par_e, xEC_n2 ) / ( f2 + 1e-16 ) * 1000
 
-        xEC_n3 = x[(nD*n1*n4):(nD*n1*n2*n4)+(nD*n1*n4)].reshape(-1,n4).sum(axis=0)
-        EC_T2s = np.dot( self.T2s, xEC_n3 ) / ( f2 + 1e-16 )
+        xEC_n4 = np.array(x[(nD*n1*n5):(nD*n2*n3*n5)+(nD*n1*n5)]).reshape(-1,n5).sum(axis=1).reshape(-1,n3).sum(axis=0)
+        d_per_e = np.dot( self.d_per_e, xEC_n4 ) / ( f2 + 1e-16 ) * 1000
 
-        return [vIC, vEC, vISO, IC_d_par, IC_T2s, EC_d_par, EC_T2s], dirs, x, A
+        xEC_n3 = x[(nD*n1*n5):(nD*n1*n2*n5)+(nD*n1*n5)].reshape(-1,n5).sum(axis=0)
+        ea_T2 = np.dot( self.T2, xEC_n3 ) / ( f2 + 1e-16 ) * 1000
+
+        if n4 !=0:
+            xISO = x[(nD*n1*n2*n5)+(nD*n1*n5):].reshape(-1,n4).sum(axis=0)
+            d_iso = np.dot( self.d_iso, xISO ) / ( f3 + 1e-16 ) * 1000
+        else:
+            d_iso = 0
+
+        return [iasf, easf, isf, d_par_a, d_par_e, d_per_e, d_iso, ia_T2, ea_T2], dirs, x, A
