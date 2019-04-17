@@ -430,7 +430,7 @@ class Evaluation :
 
         # fitting error
         if self.get_config('doComputeNRMSE') :
-        print('\t- local_FIT_nrmse.nii.gz', end=' ')
+            print('\t- local_FIT_nrmse.nii.gz', end=' ')
             niiMAP_img = self.RESULTS['NRMSE']
             niiMAP     = nibabel.Nifti1Image( niiMAP_img, affine )
             niiMAP_hdr = niiMAP.header if nibabel.__version__ >= '2.0.0' else niiMAP.get_header()
