@@ -415,6 +415,7 @@ class Evaluation :
         print(' [OK]')
 
         # estimated orientations
+        print('\t- local_FIT_dir.nii.gz', end=' ')
 
         niiMAP_img = self.RESULTS['DIRs']
         affine     = self.niiDWI.affine if nibabel.__version__ >= '2.0.0' else self.niiDWI.get_affine()
@@ -429,7 +430,7 @@ class Evaluation :
 
         # fitting error
         if self.get_config('doComputeNRMSE') :
-
+        print('\t- local_FIT_nrmse.nii.gz', end=' ')
             niiMAP_img = self.RESULTS['NRMSE']
             niiMAP     = nibabel.Nifti1Image( niiMAP_img, affine )
             niiMAP_hdr = niiMAP.header if nibabel.__version__ >= '2.0.0' else niiMAP.get_header()
@@ -455,7 +456,7 @@ class Evaluation :
 
         # voxelwise maps
         for i in xrange( len(self.model.maps_name) ) :
-
+            print('\t- local_FIT_%s.nii.gz' % self.model.maps_name[i], end=' ')
             niiMAP_img = self.RESULTS['MAPs'][:,:,:,i]
             niiMAP     = nibabel.Nifti1Image( niiMAP_img, affine )
             niiMAP_hdr = niiMAP.header if nibabel.__version__ >= '2.0.0' else niiMAP.get_header()
@@ -466,6 +467,6 @@ class Evaluation :
             niiMAP_hdr['scl_inter'] = 0
 
             nibabel.save( niiMAP, pjoin(RESULTS_path, 'local_FIT_%s.nii.gz' % self.model.maps_name[i] ) )
-            print ' [OK]'
+            print(' [OK]')
             
-        print '   [ DONE ]'
+        print('   [ DONE ]')
