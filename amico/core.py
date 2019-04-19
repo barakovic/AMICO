@@ -58,10 +58,12 @@ class Evaluation :
         self.set_config('OUTPUT_path', output_path)
 
         self.set_config('peaks_filename', None)
+        self.set_config('sf_filename', None)         # signal fraction filename
         self.set_config('doNormalizeSignal', True)
         self.set_config('doKeepb0Intact', False)     # does change b0 images in the predicted signal
         self.set_config('doComputeNRMSE', False)
         self.set_config('doSaveCorrectedDWI', False)
+        self.set_config('generateDWI', False)
         self.set_config('doMergeB0', False)          # Merge b0 volumes
         self.set_config('doDebiasSignal', False)     # Flag to remove Rician bias
         self.set_config('DWI-SNR', None)             # SNR of DWI image: SNR = b0/sigma
@@ -313,6 +315,12 @@ class Evaluation :
         if self.get_config('doSaveCorrectedDWI') :
             DWI_corrected = np.zeros(self.niiDWI.shape, dtype=np.float32)
 
+        if self.get_config('generateDWI') :
+            sf_filename = self.get_config('sf_filename')
+            niiSF = nibabel.load( pjoin( self.get_config('DATA_path'), sf_filename) )
+            SF = niiSF.get_data().astype(np.float32)
+
+            DWI_generated = np.zeros(self.niiDWI.shape, dtype=np.float32)
 
         # fit the model to the data
         # =========================
@@ -342,6 +350,9 @@ class Evaluation :
                         den = np.sum(y**2)
                         NRMSE[ix,iy,iz] = np.sqrt( np.sum((y-y_est)**2) / den ) if den > 1e-16 else 0
 
+                    if self.get_config('generateDWI') :
+                        DWI_generated[ix,iy,iz,:] = np.dot( A, SF[ix,iy,iz].reshape(-1) )
+                        
                     if self.get_config('doSaveCorrectedDWI') :
 
                         if self.model.name == 'Free-Water' :
@@ -374,6 +385,8 @@ class Evaluation :
             self.RESULTS['NRMSE'] = NRMSE
         if self.get_config('doSaveCorrectedDWI') :
             self.RESULTS['DWI_corrected'] = DWI_corrected
+        if self.get_config('generateDWI') :
+            self.RESULTS['DWI_generated'] = DWI_generated
 
 
     def save_results( self, path_suffix = None ) :
@@ -453,6 +466,15 @@ class Evaluation :
                 print(' [OK]')
             else :
                 print('          doSaveCorrectedDWI option not supported for %s model' % self.model.name)
+
+        if self.get_config('generateDWI') :
+            print('\t- dwi_generated.nii.gz', end=' ')
+            niiMAP_img = self.RESULTS['DWI_generated']
+            niiMAP     = nibabel.Nifti1Image( niiMAP_img, affine )
+            niiMAP_hdr = niiMAP.header if nibabel.__version__ >= '2.0.0' else niiMAP.get_header()
+            nibabel.save( niiMAP, pjoin(RESULTS_path, 'dwi_generated.nii.gz') )
+            print(' [OK]')
+
 
         # voxelwise maps
         for i in xrange( len(self.model.maps_name) ) :
