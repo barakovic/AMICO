@@ -1566,7 +1566,7 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
         easf = f2 / ( f1 + f2 + f3 + 1e-16 )
         isf = f3 / ( f1 + f2 + f3 + 1e-16 )
 
-        if n1 !=0 and n5 !=0 :
+        if n1 != 0 and n5 != 0 :
             xIC_n1 = x[:nD*n1*n5].reshape(-1,n1*n5).sum(axis=0)
             xIC_n2 = xIC_n1.reshape(-1,n5).sum(axis=1)
             d_par_a = np.dot( self.d_par_a, xIC_n2 ) / ( f1 + 1e-16 ) * 1000
@@ -1578,7 +1578,7 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
             ia_T2 = 0
 
 
-        if n2 !=0 and n3 !=0 and n6 != 0:
+        if n2 != 0 and n3 != 0 and n6 != 0:
             xEC_n1 = x[ (nD*n1*n5):(nD*n2*n3*n6)+(nD*n1*n5) ].reshape(-1,n2*n3*n6).sum(axis=0)
             xEC_n2 = xEC_n1.reshape(-1,n3*n6).sum(axis=1)
             d_par_e = np.dot( self.d_par_e, xEC_n2 ) / ( f2 + 1e-16 ) * 1000
@@ -1593,7 +1593,7 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
             d_per_e = 0
             ea_T2 = 0
 
-        if n4 !=0 and n7!=0 :
+        if n4 != 0 and n7 != 0 :
             xISO_n1 = x[(nD*n2*n3*n6)+(nD*n1*n5):].reshape(-1,n4*n7).sum(axis=0)
             xISO_n2 = xISO_n1.reshape(-1,n7).sum(axis=1)
             d_iso = np.dot( self.d_iso, xISO_n2 ) / ( f3 + 1e-16 ) * 1000
