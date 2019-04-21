@@ -1593,7 +1593,7 @@ class StickZeppelinBallDiffusivityT2( BaseModel ) :
             d_per_e = 0
             ea_T2 = 0
 
-        if n4 !=0:
+        if n4 !=0 and n7!=0 :
             xISO_n1 = x[(nD*n2*n3*n6)+(nD*n1*n5):].reshape(-1,n4*n7).sum(axis=0)
             xISO_n2 = xISO_n1.reshape(-1,n7).sum(axis=1)
             d_iso = np.dot( self.d_iso, xISO_n2 ) / ( f3 + 1e-16 ) * 1000
