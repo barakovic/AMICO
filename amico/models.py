@@ -440,6 +440,111 @@ class StickZeppelinBallDiffusivity( BaseModel ) :
             d_iso = 0
 
         return [iasf, easf, isf, d_par_a, d_par_e, d_per_e, d_iso], dirs, x, A
+        
+class Cellularity( BaseModel ) :
+    """Implements the Stick-Zeppelin-Ball model [1].
+
+    The intra-cellular contributions from within the axons are modeled as "sticks", i.e.
+    tensors with a given axial diffusivity (d_par) but null perpendicular diffusivity.
+    Extra-cellular contributions are modeled as tensors with the same axial diffusivity
+    as the sticks (d_par) and whose perpendicular diffusivities are calculated with a
+    tortuosity model as a function of the intra-cellular volume fractions (ICVFs).
+    Isotropic contributions are modeled as tensors with isotropic diffusivities (d_ISOs).
+
+    References
+    ----------
+    .. [1] Panagiotaki et al. (2012) Compartment models of the diffusion MR signal
+           in brain white matter: A taxonomy and comparison. NeuroImage, 59: 2241-54
+    """
+
+    def __init__( self ) :
+        self.id         = 'StickZeppelinBallDiffusivity'
+        self.name       = 'Stick-Zeppelin-Ball-Diffusivity'
+        self.maps_name  = [ 'iasf', 'd_iso', 'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'd9', 'd10', 'd11', 'd12', 'd13' ]
+        self.maps_descr = [ 'Isotropic fraction', 'Isotropic diffusivity', 'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'd9', 'd10', 'd11', 'd12', 'd13']	
+
+        self.d_iso = np.array([ 0.1E-4, 0.25E-3, 0.5E-3, 0.75E-3, 1.0E-3, 1.25E-3, 1.5E-3, 1.75E-3, 2.0E-3, 2.25E-3, 2.5E-3, 2.75E-3, 3.0E-3 ])                                   # Isotropic diffusivity [mm^2/s]
+
+
+    def set( self, d_iso ) :
+        self.d_iso = np.array( d_iso )
+
+
+    def set_solver( self, lambda1 = 0.0, lambda2 = 0.0 ) :
+        params = {}
+        params['mode']    = 2
+        params['pos']     = True
+        params['lambda1'] = lambda1
+        params['lambda2'] = lambda2
+        return params
+
+
+    def generate( self, out_path, aux, idx_in, idx_out ) :
+        scheme_high = amico.lut.create_high_resolution_scheme( self.scheme, b_scale=1 )
+        gtab = gradient_table( scheme_high.b, scheme_high.raw[:,0:3] )
+
+        nATOMS = len(self.d_iso)
+        progress = ProgressBar( n=nATOMS, prefix="   ", erase=True )
+
+        # Ball(s)
+        for d in self.d_iso :
+            signal = single_tensor( gtab, evals=[d, d, d] )
+            lm = amico.lut.rotate_kernel( signal, aux, idx_in, idx_out, True )
+            np.save( pjoin( out_path, 'A_%03d.npy'%progress.i ), lm )
+            progress.update()
+
+
+    def resample( self, in_path, idx_out, Ylm_out, doMergeB0 ) :
+        KERNELS = {}
+        KERNELS['model'] = self.id
+        if doMergeB0:
+            nS = 1+self.scheme.dwi_count
+            merge_idx = np.hstack((self.scheme.b0_idx[0],self.scheme.dwi_idx))
+        else:
+            nS = self.scheme.nS
+            merge_idx = np.arange(nS)
+        KERNELS['iso']   = np.zeros( (len(self.d_iso),nS), dtype=np.float32 )
+
+        nATOMS = len(self.d_iso)
+        progress = ProgressBar( n=nATOMS, prefix="   ", erase=True )
+
+        # Ball(s)
+        for i in xrange(len(self.d_iso)) :
+            lm = np.load( pjoin( in_path, 'A_%03d.npy'%progress.i ) )
+            KERNELS['iso'][i,...] = amico.lut.resample_kernel( lm, self.scheme.nS, idx_out, Ylm_out, True )[merge_idx]
+            progress.update()
+
+        return KERNELS
+
+
+    def fit( self, y, dirs, KERNELS, params ) :
+        n4 = len(self.d_iso)
+
+        nATOMS = n4
+
+        # prepare DICTIONARY from dirs and lookup tables
+        A = np.ones( (len(y), nATOMS ), dtype=np.float64, order='F' )
+        o = 0
+        A[:,o:] = KERNELS['iso'].T
+
+        # empty dictionary
+        if A.shape[1] == 0 :
+            return [0, 0, 0], None, None, None
+
+        # fit
+        x = spams.lasso( np.asfortranarray( y.reshape(-1,1) ), D=A, **params ).todense().A1
+
+        # return estimates
+        f3 = x[:].sum()
+
+        if n4 !=0:
+            xISO = x[:].reshape(-1,n4).sum(axis=0)
+            d_iso = np.dot( self.d_iso, xISO ) / ( f3 + 1e-16 )
+        else:
+            d_iso = 0
+
+        return [ f3, d_iso, x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], x[9], x[10], x[11], x[12] ], dirs, x, A
+
 
 
 
